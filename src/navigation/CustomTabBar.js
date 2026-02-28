@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -13,57 +13,97 @@ import { colors } from "../theme";
 
 const { width } = Dimensions.get("window");
 
-const BAR_HEIGHT = 64;
-const CENTER_SIZE = 62;
-const NOTCH_SIZE = CENTER_SIZE + 16;
+// ─── Layout constants ────────────────────────────────────────────────────────
+const BUTTON_SIZE = 56; // diameter of the elevated circle
+const NOTCH_DIAM = BUTTON_SIZE + 22; // 78 — bg-colored circle that carves the wave
+const BAR_HEIGHT = 62;
+const BUMP_H = 0; // button centre sits this many px above bar top
+const WRAPPER_H = BAR_HEIGHT + BUMP_H + BUTTON_SIZE / 2; // 112
 
+const BAR_MARGIN = 14;
+const BAR_W = width - BAR_MARGIN * 2;
+const TAB_W = BAR_W / 5;
+
+// Vertical positions from container top
+const BAR_TOP = BUMP_H + BUTTON_SIZE / 2; // 28 — where the bar begins
+
+const BTN_OVERLAP = 14; // px the button centre sits INSIDE the bar
+const BTN_CENTER_Y = BAR_TOP + BTN_OVERLAP; // 42
+const BTN_TOP_OFFSET = BTN_CENTER_Y - BUTTON_SIZE / 2; // 14 — top of the button in the container
+const NOTCH_TOP = BTN_CENTER_Y - NOTCH_DIAM / 2; //  3 — notch centred with the button
+
+// Screen-X of tab i's centre
+const getTabCenterX = (i) => BAR_MARGIN + (i + 0.5) * TAB_W;
+
+// ─── Tab definitions ─────────────────────────────────────────────────────────
 const TAB_CONFIG = [
   {
     name: "Home",
     icon: "🏠",
     activeColor: "#FF6B35",
-    gradientColors: ["#FF6B3540", "#FF6B3510"],
+    glowColors: ["#FF8C5A", "#FF4500"],
   },
   {
     name: "Challenges",
     icon: "🏆",
     activeColor: "#F5A623",
-    gradientColors: ["#F5A62340", "#F5A62310"],
+    glowColors: ["#F5C842", "#E8920A"],
   },
   {
     name: "Leaderboard",
     icon: "🌍",
     activeColor: "#9B59B6",
-    gradientColors: ["#C084FC", "#9B59B6"],
-    isCenter: true,
+    glowColors: ["#C084FC", "#7C3AED"],
   },
   {
     name: "HeadToHead",
     icon: "⚔️",
     activeColor: "#E94560",
-    gradientColors: ["#E9456040", "#E9456010"],
+    glowColors: ["#FF6B8A", "#C41B3A"],
   },
   {
     name: "Profile",
     icon: "👤",
     activeColor: "#00D4AA",
-    gradientColors: ["#00D4AA40", "#00D4AA10"],
+    glowColors: ["#00F5C8", "#00A884"],
   },
 ];
 
 export default function CustomTabBar({ state, navigation }) {
   const insets = useSafeAreaInsets();
+
+  // Single animated value tracking the X centre of the active bump
+  const bumpX = useRef(new Animated.Value(getTabCenterX(state.index))).current;
   const scaleAnims = useRef(
     TAB_CONFIG.map(() => new Animated.Value(1)),
   ).current;
-  const glowAnims = useRef(TAB_CONFIG.map(() => new Animated.Value(0))).current;
 
-  const handlePress = (tabName, index) => {
-    // Bounce animation
+  // Spring the bump to the new active tab whenever state.index changes
+  useEffect(() => {
+    Animated.spring(bumpX, {
+      toValue: getTabCenterX(state.index),
+      useNativeDriver: false, // 'left' is a layout prop — native driver unsupported
+      friction: 8,
+      tension: 130,
+    }).start();
+  }, [state.index]);
+
+  // notchLeft  = bumpX − NOTCH_DIAM/2   (linear interpolate, slope = 1)
+  // buttonLeft = bumpX − BUTTON_SIZE/2
+  const notchLeft = bumpX.interpolate({
+    inputRange: [0, width],
+    outputRange: [-NOTCH_DIAM / 2, width - NOTCH_DIAM / 2],
+  });
+  const buttonLeft = bumpX.interpolate({
+    inputRange: [0, width],
+    outputRange: [-BUTTON_SIZE / 2, width - BUTTON_SIZE / 2],
+  });
+
+  const handlePress = (name, index) => {
     Animated.sequence([
       Animated.timing(scaleAnims[index], {
-        toValue: 0.82,
-        duration: 90,
+        toValue: 0.78,
+        duration: 80,
         useNativeDriver: true,
       }),
       Animated.spring(scaleAnims[index], {
@@ -73,103 +113,68 @@ export default function CustomTabBar({ state, navigation }) {
         useNativeDriver: true,
       }),
     ]).start();
-
-    navigation.navigate(tabName);
+    navigation.navigate(name);
   };
 
   const activeIndex = state.index;
-
-  const renderTab = (tab, globalIndex) => {
-    const isActive = activeIndex === globalIndex;
-    const cfg = TAB_CONFIG[globalIndex];
-
-    return (
-      <Animated.View
-        key={tab.name}
-        style={[
-          styles.tabWrapper,
-          { transform: [{ scale: scaleAnims[globalIndex] }] },
-        ]}
-      >
-        <TouchableOpacity
-          style={styles.tab}
-          onPress={() => handlePress(tab.name, globalIndex)}
-          activeOpacity={0.7}
-        >
-          {/* Active glow background */}
-          {isActive && (
-            <LinearGradient
-              colors={cfg.gradientColors}
-              style={styles.activeGlow}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            />
-          )}
-
-          <Text style={[styles.icon, !isActive && styles.iconInactive]}>
-            {tab.icon}
-          </Text>
-
-          {/* Active dot indicator */}
-          {isActive && (
-            <View
-              style={[styles.activeDot, { backgroundColor: cfg.activeColor }]}
-            />
-          )}
-        </TouchableOpacity>
-      </Animated.View>
-    );
-  };
+  const activeCfg = TAB_CONFIG[activeIndex];
 
   return (
-    <View style={[styles.outerWrapper, { paddingBottom: insets.bottom }]}>
-      {/* Notch circle — same color as app bg, creates wave cutout illusion */}
-      <View style={styles.notchCircle} />
-
-      {/* Bar */}
-      <View style={styles.bar}>
-        {/* Left 2 tabs */}
-        <View style={styles.side}>
-          {TAB_CONFIG.slice(0, 2).map((tab, i) => renderTab(tab, i))}
-        </View>
-
-        {/* Center gap (notch space) */}
-        <View style={styles.centerGap} />
-
-        {/* Right 2 tabs */}
-        <View style={styles.side}>
-          {TAB_CONFIG.slice(3, 5).map((tab, i) => renderTab(tab, i + 3))}
-        </View>
+    <View style={[styles.container, { height: WRAPPER_H + insets.bottom }]}>
+      {/* ── 1. Flat bar — renders all 5 icons; active one is invisible (elevated button shows it) ── */}
+      <View style={[styles.bar, { top: BAR_TOP }]}>
+        {TAB_CONFIG.map((tab, i) => (
+          <Animated.View
+            key={tab.name}
+            style={[styles.tabItem, { transform: [{ scale: scaleAnims[i] }] }]}
+          >
+            <TouchableOpacity
+              style={styles.tabTouch}
+              onPress={() => handlePress(tab.name, i)}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  styles.icon,
+                  i === activeIndex ? styles.iconHidden : styles.iconInactive,
+                ]}
+              >
+                {tab.icon}
+              </Text>
+            </TouchableOpacity>
+          </Animated.View>
+        ))}
       </View>
 
-      {/* Center elevated button */}
+      {/* ── 2. Moving notch — bg-coloured circle that carves the wave dip ── */}
       <Animated.View
-        style={[
-          styles.centerButtonOuter,
-          { transform: [{ scale: scaleAnims[2] }] },
-        ]}
+        style={[styles.notch, { top: NOTCH_TOP, left: notchLeft }]}
+      />
+
+      {/* ── 3. Moving elevated button — icon & colour always match the active tab ── */}
+      <Animated.View
+        style={[styles.btnOuter, { top: BTN_TOP_OFFSET, left: buttonLeft }]}
       >
         <TouchableOpacity
-          onPress={() => handlePress("Leaderboard", 2)}
-          activeOpacity={0.85}
+          onPress={() => handlePress(activeCfg.name, activeIndex)}
+          activeOpacity={0.8}
         >
           <LinearGradient
-            colors={
-              activeIndex === 2
-                ? ["#D8A0F7", "#9B59B6", "#6C3483"]
-                : ["#8E44AD", "#6C3483", "#4A235A"]
-            }
-            style={styles.centerButton}
+            colors={activeCfg.glowColors}
+            style={[styles.btn, { shadowColor: activeCfg.activeColor }]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
           >
-            <Text style={styles.centerIcon}>🌍</Text>
-            {/* Shine streak */}
-            <View style={styles.centerShine} />
+            <Text style={styles.btnIcon}>{activeCfg.icon}</Text>
+            <View style={styles.btnShine} />
           </LinearGradient>
-
-          {/* Active ring */}
-          {activeIndex === 2 && <View style={styles.centerRing} />}
+          {/* coloured halo ring */}
+          <View
+            style={[
+              styles.btnRing,
+              { borderColor: activeCfg.activeColor + "90" },
+            ]}
+          />
         </TouchableOpacity>
       </Animated.View>
     </View>
@@ -177,144 +182,105 @@ export default function CustomTabBar({ state, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  outerWrapper: {
+  // ── Outer container ──
+  container: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    alignItems: "center",
-    // Extra height to accommodate the elevated center button
-    height: BAR_HEIGHT + CENTER_SIZE / 2 + 16,
-    justifyContent: "flex-end",
+    zIndex: 100,
   },
 
-  // The wave notch illusion — bg-colored circle punches a hole in the bar top
-  notchCircle: {
-    position: "absolute",
-    width: NOTCH_SIZE,
-    height: NOTCH_SIZE,
-    borderRadius: NOTCH_SIZE / 2,
-    backgroundColor: colors.bg, // same as app background
-    top: 6, // peek above the bar
-    zIndex: 2,
-    // No shadow — it needs to be invisible against the background
-  },
-
+  // ── Bar ──
   bar: {
-    width: width - 24,
+    position: "absolute",
+    left: BAR_MARGIN,
+    right: BAR_MARGIN,
     height: BAR_HEIGHT,
     backgroundColor: "#141428",
     borderRadius: 28,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 8,
-    zIndex: 1,
-    // Shadow
+    borderWidth: 1,
+    borderColor: "#2A2A45",
     shadowColor: "#000",
-    shadowOpacity: 0.5,
+    shadowOpacity: 0.55,
     shadowRadius: 20,
     shadowOffset: { width: 0, height: -4 },
     elevation: 20,
-    borderWidth: 1,
-    borderColor: "#2A2A45",
   },
 
-  side: {
+  tabItem: {
     flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-around",
-  },
-
-  centerGap: {
-    width: NOTCH_SIZE + 4,
-  },
-
-  tabWrapper: {
-    flex: 1,
-    alignItems: "center",
-  },
-
-  tab: {
-    width: 52,
-    height: 52,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 16,
-    position: "relative",
   },
 
-  activeGlow: {
+  tabTouch: {
+    width: 50,
+    height: 50,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  icon: { fontSize: 24 },
+
+  // Active tab's icon in the bar is hidden — the elevated button shows it
+  iconHidden: { opacity: 0 },
+  iconInactive: { opacity: 0.35 },
+
+  // ── Moving notch (wave carver) ──
+  notch: {
     position: "absolute",
-    width: 48,
-    height: 48,
-    borderRadius: 14,
+    width: NOTCH_DIAM,
+    height: NOTCH_DIAM,
+    borderRadius: NOTCH_DIAM / 2,
+    backgroundColor: colors.bg, // matches app background → invisible "hole"
+    zIndex: 2,
   },
 
-  icon: {
-    fontSize: 24,
-    zIndex: 1,
-  },
-
-  iconInactive: {
-    opacity: 0.38,
-  },
-
-  activeDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
+  // ── Moving elevated button ──
+  btnOuter: {
     position: "absolute",
-    bottom: 3,
-  },
-
-  // Center elevated button
-  centerButtonOuter: {
-    position: "absolute",
-    top: 0,
+    width: BUTTON_SIZE,
+    height: BUTTON_SIZE,
     zIndex: 10,
-    alignSelf: "center",
   },
 
-  centerButton: {
-    width: CENTER_SIZE,
-    height: CENTER_SIZE,
-    borderRadius: CENTER_SIZE / 2,
+  btn: {
+    width: BUTTON_SIZE,
+    height: BUTTON_SIZE,
+    borderRadius: BUTTON_SIZE / 2,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#9B59B6",
-    shadowOpacity: 0.7,
+    shadowOpacity: 0.75,
     shadowRadius: 16,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 18,
     overflow: "hidden",
   },
 
-  centerIcon: {
-    fontSize: 28,
-    zIndex: 1,
-  },
+  btnIcon: { fontSize: 26 },
 
-  centerShine: {
+  btnShine: {
     position: "absolute",
-    top: 6,
-    left: 10,
-    width: 20,
-    height: 10,
+    top: 7,
+    left: 8,
+    width: 18,
+    height: 9,
     borderRadius: 8,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    transform: [{ rotate: "-30deg" }],
+    backgroundColor: "rgba(255,255,255,0.22)",
+    transform: [{ rotate: "-35deg" }],
   },
 
-  centerRing: {
+  btnRing: {
     position: "absolute",
     top: -5,
     left: -5,
-    width: CENTER_SIZE + 10,
-    height: CENTER_SIZE + 10,
-    borderRadius: (CENTER_SIZE + 10) / 2,
+    width: BUTTON_SIZE + 10,
+    height: BUTTON_SIZE + 10,
+    borderRadius: (BUTTON_SIZE + 10) / 2,
     borderWidth: 2,
-    borderColor: "#9B59B6",
-    opacity: 0.6,
+    opacity: 0.65,
   },
 });
